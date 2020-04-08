@@ -1,10 +1,12 @@
 #include "cmd_line_args/cmd_line_args.h"
 
 #include <iostream>
+#include <type_traits>
 #include <vector>
 
 #ifdef _WIN32
-
+#include <fcntl.h>
+#include <io.h>
 #endif // _WIN32
 
 enum class Enum
@@ -37,33 +39,82 @@ std::ostream& operator<<(std::ostream& lhs, Enum rhs)
 }
 
 template<class T>
-void dump(const char* title, T value)
+void dump(const T& value)
 {
-    std::cout << title << ": " << std::boolalpha << value << std::endl;
+#ifdef _WIN32
+    std::wcout << std::boolalpha << value;
+#else
+    std::cout << std::boolalpha << value;
+#endif // _WIN32
+}
+
+#ifdef _WIN32
+
+void dump(const std::string& value)
+{
+    std::string string(value);
+    std::wcout << std::wstring(string.begin(), string.end());
+}
+
+void dump(const char* value)
+{
+    dump(std::string(value));
+}
+
+void dump(Enum value)
+{
+    std::ostringstream stream;
+    stream << value;
+    dump(stream.str());
+}
+
+#endif // _WIN32
+
+template<class T>
+void dump(const std::string& title, const T& value)
+{
+    dump(title);
+    dump(": ");
+    dump(value);
+    dump("\n");
 }
 
 template<class T>
-void dump(const char* title, const std::vector<T>& values)
+void dump(const std::string& title, const std::vector<T>& values)
 {
-    std::cout << title << std::boolalpha << ": [";
-    const char* delimiter = "";
+    dump(title);
+    dump(": [");
+    std::string delimiter = "";
     for (const auto& value : values)
     {
-        std::cout << delimiter << value;
+        dump(delimiter);
         delimiter = ", ";
+        dump(value);
     }
-    std::cout << "]" << std::endl;
+    dump("]\n");
 }
 
+#ifdef _WIN32
+int wmain(int argc, const wchar_t* argv[]) try
+#else
 int main(int argc, const char* argv[]) try
+#endif //_WIN32
 {
-    over9000::Parser parser;
+#ifdef _WIN32
+    _setmode(_fileno(stdout), _O_U16TEXT);
+    _setmode(_fileno(stderr), _O_U16TEXT);
+#endif
+
+    over9000::cmd_line_args::Parser parser("Sample program");
 
     bool flag = false;
     parser.addParam(flag, "flag", "Flag").shortName('f').flag();
 
-    std::string string;
+    std::basic_string<over9000::cmd_line_args::Char> string;
     parser.addParam(string, "string", "String");
+
+    std::string ascii;
+    parser.addParam(ascii, "ascii", "ASCII string");
 
     int integer = 0;
     parser.addParam(integer, "integer", "Integer");
@@ -109,21 +160,22 @@ int main(int argc, const char* argv[]) try
         .optional();
 
     std::string positionalString;
-    parser.addParam(positionalString, "Positional string");
+    parser.addPositionalParam(positionalString, "posString", "Positional string");
 
     int positionalInteger = 0;
-    parser.addParam(positionalInteger, "Positional integer");
+    parser.addPositionalParam(positionalInteger, "posInteger", "Positional integer");
 
     std::vector<Enum> positionalEnumerations;
     parser
-        .addParam(positionalEnumerations, "Positional enumerations",
-                  {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}})
+        .addPositionalParam(positionalEnumerations, "posEnums", "Positional enumerations",
+                            {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}})
         .optional();
 
     parser.parse(argc, argv);
 
     dump("Flag", flag);
     dump("String", string);
+    dump("ASCII string", ascii);
     dump("Integer", integer);
     dump("Enumeration", enumeration);
     dump("Optional string", optString);
@@ -138,6 +190,12 @@ int main(int argc, const char* argv[]) try
     dump("Positional string", positionalString);
     dump("Positional integer", positionalInteger);
     dump("Positional enumerations", positionalEnumerations);
+
+    parser.printHelp(std::wcerr);
+}
+catch (const over9000::cmd_line_args::ParseError& e)
+{
+    std::wcerr << e << std::endl;
 }
 catch (const std::exception& e)
 {
