@@ -12,8 +12,9 @@
 
 namespace {
 
-using over9000::cmd_line_args::ParseError;
+using over9000::cmd_line_args::Error;
 using over9000::cmd_line_args::Parser;
+using over9000::cmd_line_args::OPTIONAL;
 
 struct Tests : testing::Test
 {
@@ -47,10 +48,10 @@ TEST_F(Tests, stringParams)
     parser.addParam(s1, "string1", "String");
 
     std::string s2;
-    parser.addParam(s2, "string2", "String").shortName('s');
+    parser.addParam(s2, 's', "string2", "String");
 
     std::string s3;
-    parser.addParam(s3, "string3", "String").shortName('3');
+    parser.addParam(s3, '3', "string3", "String");
 
     parse({"exe", "--string1", "a b c", "-s", "s2", "--string3=s3"});
 
@@ -65,19 +66,27 @@ TEST_F(Tests, stringParams)
     ASSERT_EQ("a b c", s3);
 }
 
+TEST_F(Tests, badShortNameThrows)
+{
+    int i;
+    ASSERT_THROW(parser.addParam(i, '\1', "param", "Param"), Error);
+    ASSERT_THROW(parser.addParam(i, ' ', "param", "Param"), Error);
+    ASSERT_THROW(parser.addParam(i, static_cast<char>(128), "param", "Param"), Error);
+}
+
 TEST_F(Tests, tooShortLongNameThrows)
 {
     std::string s;
-    ASSERT_THROW(parser.addParam(s, "s", "String"), ParseError);
+    ASSERT_THROW(parser.addParam(s, "s", "String"), Error);
 }
 
 TEST_F(Tests, badArgumentNameThrows)
 {
     std::string s;
-    parser.addParam(s, "string", "String").shortName('s');
+    parser.addParam(s, 's', "string", "String");
 
-    ASSERT_THROW(parse({"exe", "-string", "s"}), ParseError);
-    ASSERT_THROW(parse({"exe", "--s", "s"}), ParseError);
+    ASSERT_THROW(parse({"exe", "-string", "s"}), Error);
+    ASSERT_THROW(parse({"exe", "--s", "s"}), Error);
 }
 
 TEST_F(Tests, missingArgumentThrows)
@@ -86,43 +95,43 @@ TEST_F(Tests, missingArgumentThrows)
     parser.addParam(s1, "s1", "String");
 
     std::string s2;
-    parser.addParam(s2, "s2", "String").shortName('s');
+    parser.addParam(s2, 's', "s2", "String");
 
-    ASSERT_THROW(parse({"exe", "--s2", "s2"}), ParseError);
+    ASSERT_THROW(parse({"exe", "--s2", "s2"}), Error);
 }
 
 TEST_F(Tests, repeatedParameterThrows)
 {
     std::string s1;
-    parser.addParam(s1, "string1", "String 1.1").shortName('s');
+    parser.addParam(s1, 's', "string1", "String 1.1");
 
     std::string s2;
-    ASSERT_THROW(parser.addParam(s2, "string1", "String 1.2"), ParseError);
+    ASSERT_THROW(parser.addParam(s2, "string1", "String 1.2"), Error);
 
     std::string s3;
-    ASSERT_THROW(parser.addParam(s2, "string2", "String 2").shortName('s'), ParseError);
+    ASSERT_THROW(parser.addParam(s2, 's', "string2", "String 2"), Error);
 }
 
 TEST_F(Tests, repeatedArgumentThrows)
 {
     std::string s;
-    parser.addParam(s, "string", "String").shortName('s');
+    parser.addParam(s, 's', "string", "String");
 
-    ASSERT_THROW(parse({"exe", "--string=1", "a", "-s", "b"}), ParseError);
-    ASSERT_THROW(parse({"exe", "-s", "a", "--string", "b"}), ParseError);
-    ASSERT_THROW(parse({"exe", "--string", "a", "--string=b"}), ParseError);
+    ASSERT_THROW(parse({"exe", "--string=1", "a", "-s", "b"}), Error);
+    ASSERT_THROW(parse({"exe", "-s", "a", "--string", "b"}), Error);
+    ASSERT_THROW(parse({"exe", "--string", "a", "--string=b"}), Error);
 }
 
 TEST_F(Tests, optionalStringParams)
 {
     std::string s1 = "s1";
-    parser.addParam(s1, "string1", "String ").optional();
+    parser.addParam(s1, "string1", "String 1", OPTIONAL);
 
     std::string s2 = "s2";
-    parser.addParam(s2, "string2", "String 2 ").shortName('s').optional();
+    parser.addParam(s2, 's', "string2", "String 2", OPTIONAL);
 
     std::string s3 = "s3";
-    parser.addParam(s3, "string3", "String 3").shortName('3').optional();
+    parser.addParam(s3, '3', "string3", "String 3", OPTIONAL);
 
     parse({"exe", "--string1", "a b c"});
 
@@ -143,10 +152,10 @@ TEST_F(Tests, intParams)
     parser.addParam(i1, "int1", "Integer 1");
 
     int i2 = 2;
-    parser.addParam(i2, "int2", "Integer 2").shortName('i');
+    parser.addParam(i2, 'i', "int2", "Integer 2");
 
     int i3 = 3;
-    parser.addParam(i3, "int3", "Integer 3").shortName('3');
+    parser.addParam(i3, '3', "int3", "Integer 3");
 
     parse({"exe", "--int1", "10", "-i", "20", "--int3=30"});
 
@@ -164,13 +173,13 @@ TEST_F(Tests, intParams)
 TEST_F(Tests, optionalIntParams)
 {
     int i1 = 1;
-    parser.addParam(i1, "int1", "Integer 1").optional();
+    parser.addParam(i1, "int1", "Integer 1", OPTIONAL);
 
     int i2 = 2;
-    parser.addParam(i2, "int2", "Integer 2").shortName('i').optional();
+    parser.addParam(i2, 'i', "int2", "Integer 2", OPTIONAL);
 
     int i3 = 3;
-    parser.addParam(i3, "int3", "Integer 3").shortName('3').optional();
+    parser.addParam(i3, '3', "int3", "Integer 3", OPTIONAL);
 
     parse({"exe", "--int1", "10"});
 
@@ -205,13 +214,13 @@ TEST_F(Tests, enumParams)
                     });
 
     Enum e2 = Enum::VALUE0;
-    parser.addParam(e2, "enum2", "Enum 2",
+    parser.addParam(e2, 'e', "enum2", "Enum 2",
                     {
                         {"V0", Enum::VALUE0},
                         {"V1", Enum::VALUE1},
                         {"V2", Enum::VALUE2},
                         {"V3", Enum::VALUE3},
-                    }).shortName('e');
+                    });
 
     Enum e3 = Enum::VALUE0;
     parser.addParam(e3, "enum3", "Enum 3",
@@ -235,16 +244,42 @@ TEST_F(Tests, enumParams)
     ASSERT_EQ(Enum::VALUE2, e3);
 }
 
+TEST_F(Tests, flagParams)
+{
+    bool f1 = false;
+    parser.addFlag(f1, '1', "f1", "Flag 1");
+
+    bool f2 = false;
+    parser.addFlag(f2, "f2", "Flag 2");
+
+    parse({"exe", "-1"});
+
+    ASSERT_TRUE(f1);
+    ASSERT_FALSE(f2);
+
+    f1 = f2 = false;
+    parse({"exe", "--f2"});
+
+    ASSERT_FALSE(f1);
+    ASSERT_TRUE(f2);
+
+    f1 = f2 = false;
+    parse({"exe", "--f1"});
+
+    ASSERT_TRUE(f1);
+    ASSERT_FALSE(f2);
+}
+
 TEST_F(Tests, positionalStringParams)
 {
     std::string required;
     parser.addParam(required, "required", "Required");
 
     std::string optional;
-    parser.addParam(optional, "optional", "Optional").optional();
+    parser.addParam(optional, "optional", "Optional", OPTIONAL);
 
     std::string positional;
-    parser.addPositionalParam(positional, "positional", "Positional");
+    parser.addPositional(positional, "positional", "Positional");
 
     parse({"exe", "--required", "1", "2"});
 
@@ -271,10 +306,10 @@ TEST_F(Tests, optionalPositionalStringParams)
     parser.addParam(required, "required", "Required");
 
     std::string optional;
-    parser.addParam(optional, "optional", "Optional").optional();
+    parser.addParam(optional, "optional", "Optional", OPTIONAL);
 
     std::string positional;
-    parser.addPositionalParam(positional, "positional", "Positional").optional();
+    parser.addPositional(positional, "positional", "Positional", OPTIONAL);
 
     parse({"exe", "--required", "req", "--optional", "opt"});
 
@@ -289,13 +324,32 @@ TEST_F(Tests, optionalPositionalStringParams)
     ASSERT_EQ("P", positional);
 }
 
-TEST_F(Tests, twoPositionalListsThrow)
+TEST_F(Tests, anyPositionalAfterOptionalPositionalThrows)
 {
-    std::vector<int> list1;
-    parser.addPositionalParam(list1, "list1", "List 1");
+    int i1 = 0;
+    parser.addPositional(i1, "i1", "Integer 1", OPTIONAL);
+
+    int i2 = 0;
+    ASSERT_THROW(parser.addPositional(i2, "i2", "Integer 2"), Error);
+    ASSERT_THROW(parser.addPositional(i2, "i2", "Integer 3", OPTIONAL), Error);
 
     std::vector<int> list2;
-    ASSERT_THROW(parser.addPositionalParam(list1, "list2", "List 2"), ParseError);
+    ASSERT_THROW(parser.addPositional(list2, "list2", "List 2"), Error);
+    ASSERT_THROW(parser.addPositional(list2, "list2", "List 2", OPTIONAL), Error);
+}
+
+TEST_F(Tests, anyPositionalAfterPositionalListThrows)
+{
+    std::vector<int> list1;
+    parser.addPositional(list1, "list1", "List 1");
+
+    int int2 = 0;
+    ASSERT_THROW(parser.addPositional(int2, "int2", "Integer 2"), Error);
+    ASSERT_THROW(parser.addPositional(int2, "int2", "Integer 2", OPTIONAL), Error);
+
+    std::vector<int> list2;
+    ASSERT_THROW(parser.addPositional(list1, "list2", "List 2"), Error);
+    ASSERT_THROW(parser.addPositional(list1, "list2", "List 2", OPTIONAL), Error);
 }
 
 } // namespace

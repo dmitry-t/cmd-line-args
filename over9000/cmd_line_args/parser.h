@@ -8,10 +8,10 @@
 #include <algorithm>
 #include <exception>
 #include <iomanip>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace over9000 {
@@ -23,18 +23,18 @@ using Char = wchar_t;
 using Char = char;
 #endif // _WIN32
 
-class ParseError : public std::exception
+class Error : public std::exception
 {
 public:
     template<class T>
-    ParseError operator<<(const T& value)
+    Error operator<<(const T& value)
     {
         stream_ << value;
         return std::move(*this);
     }
 
 #ifdef _WIN32
-    ParseError operator<<(const std::string& value)
+    Error operator<<(const std::string& value)
     {
         stream_ << std::wstring(value.begin(), value.end());
         return std::move(*this);
@@ -72,7 +72,7 @@ private:
     mutable std::string message_;
 };
 
-inline std::basic_ostream<Char>& operator<<(std::basic_ostream<Char>& lhs, const ParseError& rhs)
+inline std::basic_ostream<Char>& operator<<(std::basic_ostream<Char>& lhs, const Error& rhs)
 {
     lhs << rhs.message();
     return lhs;
@@ -80,36 +80,43 @@ inline std::basic_ostream<Char>& operator<<(std::basic_ostream<Char>& lhs, const
 
 class Parser;
 
+enum class ParamType
+{
+    REQUIRED,
+    OPTIONAL,
+};
+
+constexpr ParamType REQUIRED = ParamType::REQUIRED;
+constexpr ParamType OPTIONAL = ParamType::OPTIONAL;
+
 namespace details {
 
 class Param
 {
 public:
-    Param(std::string longName, std::string help)
-        : longName_(std::move(longName)), help_(std::move(help))
+    Param(char shortName, std::string longName, std::string help,
+          ParamType type, bool flag)
+        : shortName_(shortName), longName_(std::move(longName)), help_(std::move(help))
+        , optional_(type == ParamType::OPTIONAL), flag_(flag)
     {
-    }
-
-    /// Sets parameter short name. The name must be unique.
-    ///
-    Param& shortName(char name);
-
-    Param& optional()
-    {
-        optional_ = true;
-        return *this;
-    }
-
-    Param& flag()
-    {
-        if (index_ != 0)
+        if (shortName != '\0' && (shortName <= ' ' || shortName > 127))
         {
-            throw ParseError() << "Flag positional parameter #" << index_;
+            throw Error() << "Bad short name for parameter: --" << longName_;
         }
+    }
 
-        flag_ = true;
-        optional_ = true;
-        return *this;
+    friend std::ostream& operator<<(std::ostream& lhs, const Param& rhs)
+    {
+        if (rhs.index_ != 0) // Positional
+        {
+            lhs << "#" << rhs.index_ << " ";
+        }
+        else if (rhs.shortName_ != '\0')
+        {
+            lhs << "-" << rhs.shortName_ << "/";
+        }
+        lhs << rhs.longName_;
+        return lhs;
     }
 
 protected:
@@ -117,15 +124,15 @@ protected:
 
     virtual bool isList() const = 0;
     virtual void parse(std::basic_istream<Char>& stream) = 0;
+    virtual std::string getValidValues() const = 0;
 
+    char shortName_ = '\0';
     std::string longName_;
     std::string help_;
-    char shortName_ = '\0';
     size_t index_ = 0; // 0 for named params, 1-based index for positional params
     bool optional_ = false;
     bool flag_ = false;
     bool parsed_ = false;
-    Parser* parser_ = nullptr;
 };
 
 #ifdef _WIN32
@@ -139,7 +146,7 @@ std::string toASCII(const std::wstring& string, const char* what)
     {
         if (c > 127)
         {
-            throw ParseError() << "Not an ASCII " << what << " string: " << string;
+            throw Error() << "Not an ASCII " << what << " string: " << string;
         }
         ascii += static_cast<char>(c);
     }
@@ -169,6 +176,7 @@ template<class T>
 struct Converter
 {
     void operator()(std::basic_istream<Char>& stream, T& value) { stream >> value; }
+    std::string getValidValues() const { return {}; }
 };
 
 template<>
@@ -178,6 +186,8 @@ struct Converter<std::basic_string<Char>>
     {
         std::getline(stream, value);
     }
+
+    std::string getValidValues() const { return {}; }
 };
 
 #ifdef _WIN32
@@ -215,17 +225,43 @@ struct EnumConverter
         }
     }
 
-    std::unordered_map<std::string, T> values;
+    std::string getValidValues() const
+    {
+        std::ostringstream stream;
+        const char* delimiter = "";
+        for (const auto& v : values)
+        {
+            stream << delimiter << v.first;
+            delimiter = ", ";
+        }
+        return stream.str();
+    }
+
+    std::map<std::string, T> values;
+};
+
+template<class T>
+struct TypeTraits
+{
+    using ValueType = T;
+    using EnumValuesType = std::map<std::string, T>;
+};
+
+template<class T>
+struct TypeTraits<std::vector<T>>
+{
+    using ValueType = T;
+    using EnumValuesType = std::map<std::string, T>;
 };
 
 template<class T, class Converter>
 class ParamImpl : public Param
 {
 public:
-    ParamImpl(T& value, std::string longName, std::string help, Converter converter)
-        : Param(std::move(longName), std::move(help))
-        , converter_(std::move(converter))
-        , value_(&value)
+    ParamImpl(T& value, char shortName, std::string longName, std::string help,
+              ParamType type, bool flag, Converter converter)
+        : Param(shortName, std::move(longName), std::move(help), type, flag)
+        , converter_(std::move(converter)), value_(&value)
     {
     }
 
@@ -235,10 +271,16 @@ public:
     {
         if (parsed_)
         {
-            throw ParseError() << "Repeated argument: --" << longName_;
+            throw Error() << "Repeated argument: --" << longName_;
         }
+
         converter_(stream, *value_);
         parsed_ = true;
+    }
+
+    std::string getValidValues() const override
+    {
+        return converter_.getValidValues();
     }
 
 private:
@@ -250,10 +292,10 @@ template<class T, class Converter>
 class ParamImpl<std::vector<T>, Converter> : public Param
 {
 public:
-    ParamImpl(std::vector<T>& value, std::string longName, std::string help, Converter converter)
-        : Param(std::move(longName), std::move(help))
-        , converter_(std::move(converter))
-        , value_(&value)
+    ParamImpl(std::vector<T>& value, char shortName, std::string longName, std::string help,
+        ParamType type, bool flag, Converter converter)
+        : Param(shortName, std::move(longName), std::move(help), type, flag)
+        , converter_(std::move(converter)), value_(&value)
     {
     }
 
@@ -273,6 +315,11 @@ public:
         parsed_ = true;
     }
 
+    std::string getValidValues() const override
+    {
+        return converter_.getValidValues();
+    }
+
 private:
     Converter converter_;
     std::vector<T>* value_ = nullptr;
@@ -286,84 +333,66 @@ public:
     explicit Parser(std::string description) : description_(std::move(description)) {}
 
     template<class T>
-    details::Param& addParam(T& value, const std::string& longName, std::string help)
+    void addParam(T& value, char shortName, const std::string& longName, std::string help,
+                             ParamType type = ParamType::REQUIRED)
     {
-        static_assert(!std::is_enum<T>(), "Missing enum values");
-
-        return addNamedParam(std::make_unique<details::ParamImpl<T, details::Converter<T>>>(
-            value, longName, std::move(help), details::Converter<T>{}));
+        addParam(makeParam(value, shortName, longName, std::move(help), type, false));
     }
 
     template<class T>
-    details::Param& addParam(std::vector<T>& value, const std::string& longName, std::string help)
+    void addParam(T& value, const std::string& longName, std::string help,
+                             ParamType type = ParamType::REQUIRED)
     {
-        static_assert(!std::is_enum<T>(), "Missing enum values");
-
-        return addNamedParam(
-            std::make_unique<details::ParamImpl<std::vector<T>, details::Converter<T>>>(
-                value, longName, std::move(help), details::Converter<T>{}));
+        addParam(value, '\0', longName, std::move(help), type);
     }
 
     template<class T>
-    details::Param& addParam(T& value, const std::string& longName, std::string help,
-                             std::unordered_map<std::string, T> enumValues)
+    void addParam(T& value, char shortName, const std::string& longName, std::string help,
+                             typename details::TypeTraits<T>::EnumValuesType enumValues,
+                             ParamType type = ParamType::REQUIRED)
     {
-        return addNamedParam(std::make_unique<details::ParamImpl<T, details::EnumConverter<T>>>(
-            value, longName, std::move(help), details::EnumConverter<T>{std::move(enumValues)}));
+        addParam(makeEnumParam(
+            value, shortName, longName, std::move(help), type, false, std::move(enumValues)));
     }
 
     template<class T>
-    details::Param& addParam(std::vector<T>& value, const std::string& longName, std::string help,
-                             std::unordered_map<std::string, T> enumValues)
+    void addParam(T& value, const std::string& longName, std::string help,
+                             typename details::TypeTraits<T>::EnumValuesType enumValues,
+                             ParamType type = ParamType::REQUIRED)
     {
-        return addNamedParam(
-            std::make_unique<details::ParamImpl<std::vector<T>, details::EnumConverter<T>>>(
-                value, longName, std::move(help),
-                details::EnumConverter<T>{std::move(enumValues)}));
+        addParam(value, '\0', longName, std::move(help), std::move(enumValues), type);
     }
 
     template<class T>
-    details::Param& addPositionalParam(T& value, const std::string& longName, std::string help)
+    void addFlag(T& value, char shortName, const std::string& longName, std::string help)
     {
-        static_assert(!std::is_enum<T>(), "Missing enum values");
-
-        return addPositionalParam(std::make_unique<details::ParamImpl<T, details::Converter<T>>>(
-            value, longName, std::move(help), details::Converter<T>{}));
+        static_assert (std::is_integral<T>::value, "Value must be of integral type");
+        addParam(makeParam(value, shortName, longName, std::move(help), OPTIONAL, true));
     }
 
     template<class T>
-    details::Param& addPositionalParam(std::vector<T>& value, const std::string& longName,
-                                       std::string help)
+    void addFlag(T& value, const std::string& longName, std::string help)
     {
-        static_assert(!std::is_enum<T>(), "Missing enum values");
-
-        return addPositionalParam(
-            std::make_unique<details::ParamImpl<std::vector<T>, details::Converter<T>>>(
-                value, longName, std::move(help), details::Converter<T>{}));
+        addFlag(value, '\0', longName, std::move(help));
     }
 
     template<class T>
-    details::Param& addPositionalParam(T& value, const std::string& longName, std::string help,
-                                       std::unordered_map<std::string, T> enumValues)
+    void addPositional(T& value, const std::string& longName, std::string help,
+                                  ParamType type = ParamType::REQUIRED)
     {
-        return addPositionalParam(
-            std::make_unique<details::ParamImpl<T, details::EnumConverter<T>>>(
-                value, longName, std::move(help),
-                details::EnumConverter<T>{std::move(enumValues)}));
+        addPositional(makeParam(value, '\0', longName, std::move(help), type, false));
     }
 
     template<class T>
-    details::Param& addPositionalParam(std::vector<T>& value, const std::string& longName,
-                                       std::string help,
-                                       std::unordered_map<std::string, T> enumValues)
+    void addPositional(T& value, const std::string& longName, std::string help,
+                                  typename details::TypeTraits<T>::EnumValuesType enumValues,
+                                  ParamType type = ParamType::REQUIRED)
     {
-        return addPositionalParam(
-            std::make_unique<details::ParamImpl<std::vector<T>, details::EnumConverter<T>>>(
-                value, longName, std::move(help),
-                details::EnumConverter<T>{std::move(enumValues)}));
+        addPositional(makeEnumParam(
+            value, '\0', longName, std::move(help), type, false, std::move(enumValues)));
     }
 
-    void parse(int argc, const Char* argv[])
+    void parse(int argc, const Char* const argv[])
     {
         // Calculate the executable base name
 
@@ -392,20 +421,6 @@ public:
             param->parsed_ = false;
         }
 
-        details::Param* optionalParam = nullptr;
-        for (const auto& param : positionalParams_)
-        {
-            if (param->optional_)
-            {
-                optionalParam = param.get();
-            }
-            else if (optionalParam != nullptr)
-            {
-                throw ParseError() << "Optional positional parameter #" << optionalParam->index_
-                                   << " followed by non-optional #" << param->index_;
-            }
-        }
-
         std::basic_stringstream<Char> stream;
         size_t currentPositionalPos = 0;
         details::Param* currentNamedParam = nullptr;
@@ -413,7 +428,7 @@ public:
         {
             if (argIter == nullptr)
             {
-                throw ParseError() << "Bad argument #" << (argIter - argv + 1);
+                throw Error() << "Bad argument #" << (argIter - argv + 1);
             }
 
             std::basic_string<Char> arg(*argIter);
@@ -429,7 +444,7 @@ public:
             {
                 if (currentPositionalPos >= positionalParams_.size())
                 {
-                    throw ParseError() << "Unexpected positional argument: " << arg;
+                    throw Error() << "Unexpected positional argument: " << arg;
                 }
 
                 parseArg(*positionalParams_[currentPositionalPos], arg, stream);
@@ -446,7 +461,7 @@ public:
                 auto iter = paramsByShortName_.find(static_cast<char>(arg[1]));
                 if (iter == paramsByShortName_.end())
                 {
-                    throw ParseError() << "Unexpected argument: " << arg;
+                    throw Error() << "Unexpected argument: " << arg;
                 }
 
                 if (iter->second->flag_)
@@ -465,7 +480,7 @@ public:
 
             if (arg[1] != '-')
             {
-                throw ParseError() << "Bad argument: " << arg;
+                throw Error() << "Bad argument: " << arg;
             }
 
             // --long-opt[=value| value|]
@@ -478,7 +493,7 @@ public:
                 auto iter = paramsByLongName_.find(argName);
                 if (iter == paramsByLongName_.end())
                 {
-                    throw ParseError() << "Unexpected argument: --" << argName;
+                    throw Error() << "Unexpected argument: --" << argName;
                 }
 
                 if (iter->second->flag_)
@@ -503,7 +518,7 @@ public:
             auto iter = paramsByLongName_.find(argName);
             if (iter == paramsByLongName_.end())
             {
-                throw ParseError() << "Unexpected argument: --" << argName;
+                throw Error() << "Unexpected argument: --" << argName;
             }
             parseArg(*iter->second, arg, stream);
         }
@@ -512,7 +527,7 @@ public:
         {
             if (!param->parsed_ && !param->optional_)
             {
-                throw ParseError() << "Missing argument: --" << param->longName_;
+                throw Error() << "Missing argument: " << *param;
             }
         }
 
@@ -520,7 +535,7 @@ public:
         {
             if (!param->parsed_ && !param->optional_)
             {
-                throw ParseError() << "Missing positional argument #" << param->index_;
+                throw Error() << "Missing positional argument " << *param;
             }
         }
     }
@@ -682,7 +697,15 @@ public:
             paramOutput.str({});
 
             output << paramString << std::setfill(' ')
-                   << std::setw(maxHelpIndent - paramString.size()) << "" << param.help_ << "\n";
+                   << std::setw(maxHelpIndent - paramString.size()) << "" << param.help_;
+
+            auto validValues = param.getValidValues();
+            if (!validValues.empty())
+            {
+                output << ". Valid values: " << validValues;
+            }
+
+            output << "\n";
         };
 
         for (const auto& param : namedParams_)
@@ -715,49 +738,73 @@ public:
 private:
     friend class over9000::cmd_line_args::details::Param;
 
-    // Called by Param::shortName()
-    void setShortName(details::Param* param, char shortName)
+    template<class T>
+    static std::unique_ptr<details::Param> makeParam(T& value, char shortName,
+        const std::string& longName, std::string help, ParamType type, bool flag)
     {
-        auto iter = paramsByShortName_.find(shortName);
-        if (iter != paramsByShortName_.end())
-        {
-            throw ParseError() << "Repeated short name parameter: -" << shortName;
-        }
-
-        paramsByShortName_.emplace(shortName, param);
+        using ValueType = typename details::TypeTraits<T>::ValueType;
+        static_assert (!std::is_enum<ValueType>(), "Missing enum values");
+        return std::make_unique<details::ParamImpl<T, details::Converter<ValueType>>>(
+            value, shortName, longName, std::move(help), type, flag,
+            details::Converter<ValueType>());
     }
 
-    details::Param& addNamedParam(std::unique_ptr<details::Param> param)
+    template<class T>
+    static std::unique_ptr<details::Param> makeEnumParam(T& value, char shortName,
+        const std::string& longName, std::string help, ParamType type, bool flag,
+        typename details::TypeTraits<T>::EnumValuesType enumValues)
+    {
+        using ValueType = typename details::TypeTraits<T>::ValueType;
+        return std::make_unique<details::ParamImpl<T, details::EnumConverter<ValueType>>>(
+                value, shortName, longName, std::move(help), type, false,
+                details::EnumConverter<ValueType>{std::move(enumValues)});
+    }
+
+    void addParam(std::unique_ptr<details::Param> param)
     {
         if (param->longName_.size() < 2)
         {
-            throw ParseError() << "Too short long name parameter: --" << param->longName_;
+            throw Error() << "Too short long name parameter: " << *param;
         }
 
         auto iter = paramsByLongName_.find(param->longName_);
         if (iter != paramsByLongName_.end())
         {
-            throw ParseError() << "Repeated long name parameter: --" << param->longName_;
+            throw Error() << "Repeated parameter long name: " << *param;
         }
 
-        param->parser_ = this;
+        if (param->shortName_ != '\0')
+        {
+            auto iter = paramsByShortName_.find(param->shortName_);
+            if (iter != paramsByShortName_.end())
+            {
+                throw Error() << "Repeated parameter short name: " << *param;
+            }
+
+            paramsByShortName_.emplace(param->shortName_, param.get());
+        }
+
         paramsByLongName_.emplace(param->longName_, param.get());
         namedParams_.push_back(std::move(param));
-        return *namedParams_.back();
     }
 
-    details::Param& addPositionalParam(std::unique_ptr<details::Param> param)
+    void addPositional(std::unique_ptr<details::Param> param)
     {
-        size_t param_index = positionalParams_.size(); // 1-based index
+        param->index_ = positionalParams_.size(); // 1-based index
 
-        if (param->isList() && !positionalParams_.empty() && positionalParams_.back()->isList())
+        if (!positionalParams_.empty() && positionalParams_.back()->optional_)
         {
-            throw ParseError() << "Repeated positional list parameter #" << (param_index + 1);
+            throw Error() << "Optional positional parameter " << *positionalParams_.back()
+                                << " followed by another positional parameter " << *param;
+        }
+
+        if (!positionalParams_.empty() && positionalParams_.back()->isList())
+        {
+            throw Error() << "Positional list parameter " << *positionalParams_.back()
+                << " followed by another positional parameter " << *param;
         }
 
         positionalParams_.push_back(std::move(param));
-        positionalParams_.back()->index_ = param_index;
-        return *positionalParams_.back();
     }
 
     void parseArg(details::Param& param, const std::basic_string<Char>& arg,
@@ -768,43 +815,28 @@ private:
         param.parse(stream);
         if (stream.fail() || !stream.eof())
         {
-            if (param.index_ != 0)
+            auto validValues = param.getValidValues();
+            if (!validValues.empty())
             {
-                throw ParseError() << "Bad positional argument #" << param.index_ << ": " << arg;
+                validValues.insert(0, ". Valid values: ");
             }
 
-            throw ParseError() << "Bad argument --" << param.longName_ << ": " << arg;
+            if (param.index_ != 0)
+            {
+                throw Error() << "Bad positional argument #" << param.index_ << " " << param.longName_ << ": " << arg << validValues;
+            }
+
+            throw Error() << "Bad argument --" << param.longName_ << ": " << arg << validValues;
         }
     }
 
     std::string description_;
-    std::unordered_map<char, details::Param*> paramsByShortName_;
-    std::unordered_map<std::string, details::Param*> paramsByLongName_;
+    std::map<char, details::Param*> paramsByShortName_;
+    std::map<std::string, details::Param*> paramsByLongName_;
     std::vector<std::unique_ptr<details::Param>> namedParams_;
     std::vector<std::unique_ptr<details::Param>> positionalParams_;
     std::basic_string<Char> exeName_;
 };
-
-namespace details {
-
-Param& Param::shortName(char name)
-{
-    if (index_ != 0)
-    {
-        throw ParseError() << "Short name for positional parameter: #" << this->index_;
-    }
-
-    if (name <= ' ' || name > 127)
-    {
-        throw ParseError() << "Bad short name for parameter: --" << longName_;
-    }
-
-    shortName_ = name;
-    parser_->setShortName(this, name);
-    return *this;
-}
-
-} // namespace details
 
 } // namespace cmd_line_args
 } // namespace over9000
