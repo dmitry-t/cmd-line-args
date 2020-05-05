@@ -90,11 +90,9 @@ public:
     {
     }
 
-    Param& shortName(char name)
-    {
-        shortName_ = name;
-        return *this;
-    }
+    /// Sets parameter short name. The name must be unique.
+    ///
+    Param& shortName(char name);
 
     Param& optional()
     {
@@ -104,6 +102,11 @@ public:
 
     Param& flag()
     {
+        if (index_ != 0)
+        {
+            throw ParseError() << "Flag positional parameter #" << index_;
+        }
+
         flag_ = true;
         optional_ = true;
         return *this;
@@ -116,13 +119,13 @@ protected:
     virtual void parse(std::basic_istream<Char>& stream) = 0;
 
     std::string longName_;
-    size_t index_ = 0;
     std::string help_;
     char shortName_ = '\0';
-    bool positional_ = false;
+    size_t index_ = 0; // 0 for named params, 1-based index for positional params
     bool optional_ = false;
     bool flag_ = false;
     bool parsed_ = false;
+    Parser* parser_ = nullptr;
 };
 
 #ifdef _WIN32
@@ -258,6 +261,12 @@ public:
 
     void parse(std::basic_istream<Char>& stream) override
     {
+        // Handle repeated Parser::parse() calls
+        if (!parsed_)
+        {
+            value_->clear();
+        }
+
         T value;
         converter_(stream, value);
         value_->push_back(value);
@@ -356,6 +365,8 @@ public:
 
     void parse(int argc, const Char* argv[])
     {
+        // Calculate the executable base name
+
         exeName_ = argv[0];
 
 #ifdef _WIN32
@@ -369,36 +380,16 @@ public:
             exeName_.erase(0, slashPos + 1);
         }
 
-        // Check short name uniqueness
+        // Reset paremeter states
+
         for (const auto& param : namedParams_)
         {
-            if (param->shortName_ != '\0')
-            {
-                auto iter = paramsByShortName_.find(param->shortName_);
-                if (iter != paramsByShortName_.end())
-                {
-                    throw ParseError() << "Repeated short name parameter: -" << param->shortName_;
-                }
-
-                paramsByShortName_.emplace(param->shortName_, param.get());
-            }
+            param->parsed_ = false;
         }
 
         for (const auto& param : positionalParams_)
         {
-            if (param->flag_)
-            {
-                throw ParseError() << "Flag positional parameter #" << param->index_;
-            }
-        }
-
-        for (size_t i = 1; i < positionalParams_.size(); ++i)
-        {
-            auto& param = positionalParams_[i - 1];
-            if (param->isList())
-            {
-                throw ParseError() << "Not last positional list parameter #" << param->index_;
-            }
+            param->parsed_ = false;
         }
 
         details::Param* optionalParam = nullptr;
@@ -512,7 +503,7 @@ public:
             auto iter = paramsByLongName_.find(argName);
             if (iter == paramsByLongName_.end())
             {
-                throw ParseError() << "Unexpected argument: --" << arg;
+                throw ParseError() << "Unexpected argument: --" << argName;
             }
             parseArg(*iter->second, arg, stream);
         }
@@ -722,14 +713,34 @@ public:
     }
 
 private:
+    friend class over9000::cmd_line_args::details::Param;
+
+    // Called by Param::shortName()
+    void setShortName(details::Param* param, char shortName)
+    {
+        auto iter = paramsByShortName_.find(shortName);
+        if (iter != paramsByShortName_.end())
+        {
+            throw ParseError() << "Repeated short name parameter: -" << shortName;
+        }
+
+        paramsByShortName_.emplace(shortName, param);
+    }
+
     details::Param& addNamedParam(std::unique_ptr<details::Param> param)
     {
+        if (param->longName_.size() < 2)
+        {
+            throw ParseError() << "Too short long name parameter: --" << param->longName_;
+        }
+
         auto iter = paramsByLongName_.find(param->longName_);
         if (iter != paramsByLongName_.end())
         {
             throw ParseError() << "Repeated long name parameter: --" << param->longName_;
         }
 
+        param->parser_ = this;
         paramsByLongName_.emplace(param->longName_, param.get());
         namedParams_.push_back(std::move(param));
         return *namedParams_.back();
@@ -737,9 +748,15 @@ private:
 
     details::Param& addPositionalParam(std::unique_ptr<details::Param> param)
     {
+        size_t param_index = positionalParams_.size(); // 1-based index
+
+        if (param->isList() && !positionalParams_.empty() && positionalParams_.back()->isList())
+        {
+            throw ParseError() << "Repeated positional list parameter #" << (param_index + 1);
+        }
+
         positionalParams_.push_back(std::move(param));
-        positionalParams_.back()->index_ = positionalParams_.size(); // 1-based index
-        positionalParams_.back()->positional_ = true;
+        positionalParams_.back()->index_ = param_index;
         return *positionalParams_.back();
     }
 
@@ -751,7 +768,7 @@ private:
         param.parse(stream);
         if (stream.fail() || !stream.eof())
         {
-            if (param.positional_)
+            if (param.index_ != 0)
             {
                 throw ParseError() << "Bad positional argument #" << param.index_ << ": " << arg;
             }
@@ -767,6 +784,27 @@ private:
     std::vector<std::unique_ptr<details::Param>> positionalParams_;
     std::basic_string<Char> exeName_;
 };
+
+namespace details {
+
+Param& Param::shortName(char name)
+{
+    if (index_ != 0)
+    {
+        throw ParseError() << "Short name for positional parameter: #" << this->index_;
+    }
+
+    if (name <= ' ' || name > 127)
+    {
+        throw ParseError() << "Bad short name for parameter: --" << longName_;
+    }
+
+    shortName_ = name;
+    parser_->setShortName(this, name);
+    return *this;
+}
+
+} // namespace details
 
 } // namespace cmd_line_args
 } // namespace over9000

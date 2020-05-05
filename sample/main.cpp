@@ -1,4 +1,9 @@
-#include "cmd_line_args/cmd_line_args.h"
+// Command line argument parser
+//
+// Copyright 2020, Dmitry Tarakanov
+// SPDX-License-Identifier: MIT
+//
+#include "over9000/cmd_line_args/parser.h"
 
 #include <iostream>
 #include <type_traits>
