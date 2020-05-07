@@ -13,8 +13,8 @@
 namespace {
 
 using over9000::cmd_line_args::Error;
-using over9000::cmd_line_args::Parser;
 using over9000::cmd_line_args::OPTIONAL;
+using over9000::cmd_line_args::Parser;
 
 struct Tests : testing::Test
 {
@@ -48,10 +48,10 @@ TEST_F(Tests, stringParams)
     parser.addParam(s1, "string1", "String");
 
     std::string s2;
-    parser.addParam(s2, 's', "string2", "String");
+    parser.addParam(s2, "string2", 's', "String");
 
     std::string s3;
-    parser.addParam(s3, '3', "string3", "String");
+    parser.addParam(s3, "string3", '3', "String");
 
     parse({"exe", "--string1", "a b c", "-s", "s2", "--string3=s3"});
 
@@ -69,9 +69,9 @@ TEST_F(Tests, stringParams)
 TEST_F(Tests, badShortNameThrows)
 {
     int i;
-    ASSERT_THROW(parser.addParam(i, '\1', "param", "Param"), Error);
-    ASSERT_THROW(parser.addParam(i, ' ', "param", "Param"), Error);
-    ASSERT_THROW(parser.addParam(i, static_cast<char>(128), "param", "Param"), Error);
+    ASSERT_THROW(parser.addParam(i, "param", '\1', "Param"), Error);
+    ASSERT_THROW(parser.addParam(i, "param", ' ', "Param"), Error);
+    ASSERT_THROW(parser.addParam(i, "param", static_cast<char>(-128), "Param"), Error);
 }
 
 TEST_F(Tests, tooShortLongNameThrows)
@@ -83,7 +83,7 @@ TEST_F(Tests, tooShortLongNameThrows)
 TEST_F(Tests, badArgumentNameThrows)
 {
     std::string s;
-    parser.addParam(s, 's', "string", "String");
+    parser.addParam(s, "string", 's', "String");
 
     ASSERT_THROW(parse({"exe", "-string", "s"}), Error);
     ASSERT_THROW(parse({"exe", "--s", "s"}), Error);
@@ -95,7 +95,7 @@ TEST_F(Tests, missingArgumentThrows)
     parser.addParam(s1, "s1", "String");
 
     std::string s2;
-    parser.addParam(s2, 's', "s2", "String");
+    parser.addParam(s2, "s2", 's', "String");
 
     ASSERT_THROW(parse({"exe", "--s2", "s2"}), Error);
 }
@@ -103,19 +103,19 @@ TEST_F(Tests, missingArgumentThrows)
 TEST_F(Tests, repeatedParameterThrows)
 {
     std::string s1;
-    parser.addParam(s1, 's', "string1", "String 1.1");
+    parser.addParam(s1, "string1", 's', "String 1.1");
 
     std::string s2;
     ASSERT_THROW(parser.addParam(s2, "string1", "String 1.2"), Error);
 
     std::string s3;
-    ASSERT_THROW(parser.addParam(s2, 's', "string2", "String 2"), Error);
+    ASSERT_THROW(parser.addParam(s2, "string2", 's', "String 2"), Error);
 }
 
 TEST_F(Tests, repeatedArgumentThrows)
 {
     std::string s;
-    parser.addParam(s, 's', "string", "String");
+    parser.addParam(s, "string", 's', "String");
 
     ASSERT_THROW(parse({"exe", "--string=1", "a", "-s", "b"}), Error);
     ASSERT_THROW(parse({"exe", "-s", "a", "--string", "b"}), Error);
@@ -128,10 +128,10 @@ TEST_F(Tests, optionalStringParams)
     parser.addParam(s1, "string1", "String 1", OPTIONAL);
 
     std::string s2 = "s2";
-    parser.addParam(s2, 's', "string2", "String 2", OPTIONAL);
+    parser.addParam(s2, "string2", 's', "String 2", OPTIONAL);
 
     std::string s3 = "s3";
-    parser.addParam(s3, '3', "string3", "String 3", OPTIONAL);
+    parser.addParam(s3, "string3", '3', "String 3", OPTIONAL);
 
     parse({"exe", "--string1", "a b c"});
 
@@ -152,10 +152,10 @@ TEST_F(Tests, intParams)
     parser.addParam(i1, "int1", "Integer 1");
 
     int i2 = 2;
-    parser.addParam(i2, 'i', "int2", "Integer 2");
+    parser.addParam(i2, "int2", 'i', "Integer 2");
 
     int i3 = 3;
-    parser.addParam(i3, '3', "int3", "Integer 3");
+    parser.addParam(i3, "int3", '3', "Integer 3");
 
     parse({"exe", "--int1", "10", "-i", "20", "--int3=30"});
 
@@ -176,10 +176,10 @@ TEST_F(Tests, optionalIntParams)
     parser.addParam(i1, "int1", "Integer 1", OPTIONAL);
 
     int i2 = 2;
-    parser.addParam(i2, 'i', "int2", "Integer 2", OPTIONAL);
+    parser.addParam(i2, "int2", 'i', "Integer 2", OPTIONAL);
 
     int i3 = 3;
-    parser.addParam(i3, '3', "int3", "Integer 3", OPTIONAL);
+    parser.addParam(i3, "int3", '3', "Integer 3", OPTIONAL);
 
     parse({"exe", "--int1", "10"});
 
@@ -214,7 +214,7 @@ TEST_F(Tests, enumParams)
                     });
 
     Enum e2 = Enum::VALUE0;
-    parser.addParam(e2, 'e', "enum2", "Enum 2",
+    parser.addParam(e2, "enum2", 'e', "Enum 2",
                     {
                         {"V0", Enum::VALUE0},
                         {"V1", Enum::VALUE1},
@@ -247,7 +247,7 @@ TEST_F(Tests, enumParams)
 TEST_F(Tests, flagParams)
 {
     bool f1 = false;
-    parser.addFlag(f1, '1', "f1", "Flag 1");
+    parser.addFlag(f1, "f1", '1', "Flag 1");
 
     bool f2 = false;
     parser.addFlag(f2, "f2", "Flag 2");
@@ -323,6 +323,79 @@ TEST_F(Tests, optionalPositionalStringParams)
     ASSERT_EQ("O", optional);
     ASSERT_EQ("P", positional);
 }
+
+TEST_F(Tests, positionalEnumParams)
+{
+    Enum required = Enum::VALUE0;
+    parser.addParam(required, "required", "Required",
+                    {
+                        {"0", Enum::VALUE0},
+                        {"1", Enum::VALUE1},
+                        {"2", Enum::VALUE2},
+                        {"3", Enum::VALUE3},
+                    });
+
+    Enum optional = Enum::VALUE0;
+    parser.addParam(optional, "optional", "Optional",
+                    {
+                        {"0", Enum::VALUE0},
+                        {"1", Enum::VALUE1},
+                        {"2", Enum::VALUE2},
+                        {"3", Enum::VALUE3},
+                    },
+                    OPTIONAL);
+
+    Enum positional = Enum::VALUE0;
+    parser.addPositional(positional, "positional", "Positional",
+                         {
+                             {"0", Enum::VALUE0},
+                             {"1", Enum::VALUE1},
+                             {"2", Enum::VALUE2},
+                             {"3", Enum::VALUE3},
+                         });
+
+    parse({"exe", "--required", "1", "2"});
+
+    ASSERT_EQ(Enum::VALUE1, required);
+    ASSERT_EQ(Enum::VALUE0, optional);
+    ASSERT_EQ(Enum::VALUE2, positional);
+
+    parse({"exe", "3", "--required", "2"});
+
+    ASSERT_EQ(Enum::VALUE2, required);
+    ASSERT_EQ(Enum::VALUE0, optional);
+    ASSERT_EQ(Enum::VALUE3, positional);
+
+    parse({"exe", "--optional", "1", "2", "--required", "3"});
+
+    ASSERT_EQ(Enum::VALUE3, required);
+    ASSERT_EQ(Enum::VALUE1, optional);
+    ASSERT_EQ(Enum::VALUE2, positional);
+}
+
+// TEST_F(Tests, optionalPositionalStringParams)
+//{
+//    std::string required;
+//    parser.addParam(required, "required", "Required");
+//
+//    std::string optional;
+//    parser.addParam(optional, "optional", "Optional", OPTIONAL);
+//
+//    std::string positional;
+//    parser.addPositional(positional, "positional", "Positional", OPTIONAL);
+//
+//    parse({"exe", "--required", "req", "--optional", "opt"});
+//
+//    ASSERT_EQ("req", required);
+//    ASSERT_EQ("opt", optional);
+//    ASSERT_EQ("", positional);
+//
+//    parse({"exe", "--required", "R", "--optional", "O", "P"});
+//
+//    ASSERT_EQ("R", required);
+//    ASSERT_EQ("O", optional);
+//    ASSERT_EQ("P", positional);
+//}
 
 TEST_F(Tests, anyPositionalAfterOptionalPositionalThrows)
 {

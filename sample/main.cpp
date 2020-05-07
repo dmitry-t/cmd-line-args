@@ -113,7 +113,7 @@ int main(int argc, const char* argv[]) try
     over9000::cmd_line_args::Parser parser("Sample program");
 
     bool flag = false;
-    parser.addFlag(flag, 'f', "flag", "Flag");
+    parser.addFlag(flag, "flag", 'f', "Flag");
 
     std::basic_string<over9000::cmd_line_args::Char> string;
     parser.addParam(string, "string", "String");
@@ -129,43 +129,38 @@ int main(int argc, const char* argv[]) try
                     {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}});
 
     std::string optString;
-    parser.addParam(optString, "optString", "Optional string",
-                  over9000::cmd_line_args::OPTIONAL);
+    parser.addParam(optString, "optString", "Optional string", over9000::cmd_line_args::OPTIONAL);
 
     int optInteger = 0;
     parser.addParam(optInteger, "optInteger", "Optional integer",
-                  over9000::cmd_line_args::OPTIONAL);
+                    over9000::cmd_line_args::OPTIONAL);
 
     Enum optEnumeration = Enum::VALUE0;
-    parser
-        .addParam(optEnumeration, "optEnum", "Optional enumeration",
-                  {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}},
-                  over9000::cmd_line_args::OPTIONAL);
+    parser.addParam(optEnumeration, "optEnum", "Optional enumeration",
+                    {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}},
+                    over9000::cmd_line_args::OPTIONAL);
 
     std::vector<std::string> strings;
-    parser.addParam(strings, 's', "strings", "Strings");
+    parser.addParam(strings, "strings", 's', "Strings");
 
     std::vector<int> integers;
-    parser.addParam(integers, 'i', "integers", "Integers");
+    parser.addParam(integers, "integers", 'i', "Integers");
 
     std::vector<Enum> enumerations;
-    parser
-        .addParam(enumerations, 'e', "enums", "Enumerations",
-                  {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}});
+    parser.addParam(enumerations, "enums", 'e', "Enumerations",
+                    {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}});
 
     std::vector<std::string> optStrings;
-    parser.addParam(optStrings, "optStrings", "Optional string",
-                  over9000::cmd_line_args::OPTIONAL);
+    parser.addParam(optStrings, "optStrings", "Optional string", over9000::cmd_line_args::OPTIONAL);
 
     std::vector<int> optIntegers;
     parser.addParam(optIntegers, "optIntegers", "Optional integers",
-                  over9000::cmd_line_args::OPTIONAL);
+                    over9000::cmd_line_args::OPTIONAL);
 
     std::vector<Enum> optEnumerations;
-    parser
-        .addParam(optEnumerations, "optEnums", "Optional enumerations",
-                  {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}},
-                  over9000::cmd_line_args::OPTIONAL);
+    parser.addParam(optEnumerations, "optEnums", "Optional enumerations",
+                    {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}},
+                    over9000::cmd_line_args::OPTIONAL);
 
     std::string positionalString;
     parser.addPositional(positionalString, "posString", "Positional string");
@@ -174,10 +169,9 @@ int main(int argc, const char* argv[]) try
     parser.addPositional(positionalInteger, "posInteger", "Positional integer");
 
     std::vector<Enum> positionalEnumerations;
-    parser
-        .addPositional(positionalEnumerations, "posEnums", "Positional enumerations",
-                            {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}},
-                  over9000::cmd_line_args::OPTIONAL);
+    parser.addPositional(positionalEnumerations, "posEnums", "Positional enumerations",
+                         {{"value1", Enum::VALUE1}, {"value2", Enum::VALUE2}},
+                         over9000::cmd_line_args::OPTIONAL);
 
 #ifdef _WIN32
     parser.printHelp(std::wcerr);
@@ -204,14 +198,42 @@ int main(int argc, const char* argv[]) try
     dump("Positional string", positionalString);
     dump("Positional integer", positionalInteger);
     dump("Positional enumerations", positionalEnumerations);
+
+    // Command line:
+
+    // cmd-line-args-sample -f --integer 1 --string="A B C" --ascii "a b c" --enum value1 \
+    //     --strings=a -s b -s c --integers 1 -i 2 --enums value1 -e value2
+    //     --optString --optString --optInteger -1 --optEnum=value2 \
+    //     --optStrings a --optStrings b --optIntegers=9000 --optEnums value1 \
+    //     posStr -7 value1
+
+    // results in output:
+
+    // Flag: true
+    // String: A B C
+    // ASCII string: a b c
+    // Integer: 1
+    // Enumeration: VALUE1
+    // Optional string: --optString
+    // Optional integer: -1
+    // Optional enumeration: VALUE2
+    // Strings: [a, b, c]
+    // Integers: [1, 2]
+    // Enumerations: [VALUE1, VALUE2]
+    // Optional strings: [a, b]
+    // Optional integers: [9000]
+    // Optional enumerations: [VALUE1]
+    // Positional string: posStr
+    // Positional integer: -7
+    // Positional enumerations: [VALUE1]
 }
 catch (const over9000::cmd_line_args::Error& e)
 {
-    #ifdef _WIN32
+#ifdef _WIN32
     std::wcerr << e << std::endl;
-    #else
+#else
     std::cerr << e << std::endl;
-    #endif
+#endif
 }
 catch (const std::exception& e)
 {
