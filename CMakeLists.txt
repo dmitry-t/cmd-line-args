@@ -9,11 +9,11 @@ set(CMAKE_CXX_STANDARD 14)
 add_library(cmd-line-args INTERFACE)
 
 target_sources(cmd-line-args INTERFACE
-    "${CMAKE_SOURCE_DIR}/over9000/cmd_line_args/parser.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/over9000/cmd_line_args/parser.h"
 )
 
 target_include_directories(cmd-line-args INTERFACE
-    "${CMAKE_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 cmake_dependent_option(CMD_LINE_ARGS_DEV "Build tests and sample" ON
