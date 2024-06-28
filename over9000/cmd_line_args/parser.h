@@ -26,6 +26,10 @@ using Char = char;
 class Error : public std::exception
 {
 public:
+    Error() = default;
+    Error(const Error& other) : stream_(other.stream_.str()), message_(other.message_) {}
+    Error(Error&&) = default;
+
     template<class T>
     Error operator<<(const T& value)
     {
@@ -47,7 +51,14 @@ public:
         try
         {
             auto string = message();
+#if WIN32
+#pragma warning(push)
+#pragma warning(disable : 4244)
+#endif
             message_.assign(string.begin(), string.end());
+#if WIN32
+#pragma warning(pop)
+#endif
         }
         catch (...)
         {
@@ -106,6 +117,8 @@ public:
             throw Error() << "Bad short name for parameter: --" << longName_;
         }
     }
+
+    virtual ~Param() {}
 
     friend std::basic_ostream<Char>& operator<<(std::basic_ostream<Char>& lhs, const Param& rhs)
     {
@@ -810,10 +823,12 @@ private:
             throw Error() << "Too short long name parameter: " << *param;
         }
 
-        auto iter = paramsByLongName_.find(param->longName_);
-        if (iter != paramsByLongName_.end())
         {
-            throw Error() << "Repeated parameter long name: " << *param;
+            auto iter = paramsByLongName_.find(param->longName_);
+            if (iter != paramsByLongName_.end())
+            {
+                throw Error() << "Repeated parameter long name: " << *param;
+            }
         }
 
         if (param->shortName_ != '\0')
